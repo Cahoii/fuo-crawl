@@ -1,46 +1,58 @@
 (function() {
-    // ==========================================================================
-    // CẤU HÌNH - Vui lòng điền thông tin của bạn vào đây
-    // ==========================================================================
+    console.clear();
     
-    // Đường dẫn thư mục chứa file trên website (ví dụ: '/attachments/' hoặc '/media/')
-    const baseUrl = '/attachments/'; 
-    
-    // Phần cố định của tên file (không bao gồm số và đuôi .webp)
-    // Ví dụ: 'aig202c_-_sp_2025_-_fe_3755-webp.1961'
-    const filePrefix = 'YOUR_FILE_PREFIX_HERE'; 
-    
-    // Số bắt đầu và kết thúc (file sẽ tải từ filePrefix11 đến filePrefix70)
-    const startNum = 'startNum';
-    const endNum = 'endNum';
+    // --- CẤU HÌNH (Bạn chỉ cần sửa 2 số này) ---
+    const startID = 'startID'; // Số ID của ảnh đầu tiên
+    const endID = 'endID';   // Số ID của ảnh cuối cùng
+    // --------------------------------------------
 
-    // Khoảng cách giữa mỗi lần tải (milliseconds) - khuyến nghị 300-500ms
-    const delayBetweenDownloads = 300;
+    console.log(`🚀 Đang tìm kiếm các file từ ID .${startID} đến .${endID} trên giao diện...`);
 
-    // ==========================================================================
-    // CODE XỬ LÝ - Không cần chỉnh sửa phần bên dưới
-    // ==========================================================================
+    // Lấy tất cả các thẻ A chứa link attachment
+    const allLinks = document.querySelectorAll('a[href*="attachments"]');
+    let count = 0;
+    let delay = 0;
 
-    console.log(`🚀 Bắt đầu tạo lệnh tải từ file đuôi ...${startNum} đến ...${endNum}`);
+    for (let id = startID; id <= endID; id++) {
+        let found = false;
 
-    let delayTime = 0;
+        // Tìm link nào chứa mã ID này (ví dụ chứa .196111)
+        for (let link of allLinks) {
+            if (link.href.includes(`.${id}`) || link.href.includes(`/${id}`)) {
+                found = true;
+                
+                // Tạo độ trễ để tránh bị trình duyệt chặn tải hàng loạt
+                setTimeout(() => {
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = link.href;
+                    
+                    // Xử lý lấy tên file gốc từ URL để lưu cho đúng (giữ nguyên q1, q2... hoặc aig...)
+                    // URL thường dạng: .../attachments/ten-file-goc.123456/
+                    let fileName = link.href.split('attachments/')[1].replace('/', ''); 
+                    if (!fileName.endsWith('.webp')) fileName += '.webp'; // Đảm bảo đuôi file
 
-    for (let i = startNum; i <= endNum; i++) {
-        const fileName = filePrefix + i;
-        const fullUrl = baseUrl + fileName;
+                    downloadLink.download = fileName;
+                    document.body.appendChild(downloadLink);
+                    downloadLink.click();
+                    document.body.removeChild(downloadLink);
+                    
+                    console.log(`⬇️ [${id}] Đang tải: ${fileName}`);
+                }, delay);
 
-        setTimeout(() => {
-            const link = document.createElement('a');
-            link.href = fullUrl;
-            link.download = fileName + ".webp"; 
-            
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            console.log(`⬇️ Đang tải: ...${i}`);
-        }, delayTime);
+                delay += 400; // Mỗi file cách nhau 0.4 giây
+                count++;
+                break; // Tìm thấy rồi thì dừng vòng lặp link, chuyển sang ID tiếp theo
+            }
+        }
 
-        delayTime += delayBetweenDownloads; 
+        if (!found) {
+            console.warn(`⚠️ Không tìm thấy ảnh có ID .${id} trên màn hình (Có thể bạn chưa cuộn tới đó?)`);
+        }
+    }
+
+    if (count > 0) {
+        console.log(`✅ Đã lên lịch tải ${count} file. Hãy giữ tab mở cho đến khi tải xong!`);
+    } else {
+        console.log("❌ Không tìm thấy file nào. Hãy kiểm tra lại Start ID / End ID hoặc cuộn hết trang web.");
     }
 })();

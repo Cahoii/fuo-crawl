@@ -5,22 +5,24 @@
     // CẤU HÌNH - Vui lòng điền thông tin của bạn vào đây
     // ==========================================================================
     
-    // Tên người dùng cần tìm bình luận (ví dụ: "username123")
-    const targetUser = "YOUR_USERNAME_HERE"; 
+    // Tên người dùng được ưu tiên tuyệt đối (để trống "" nếu không cần)
+    const PRIORITY_USER = "YOUR_PRIORITY_USERNAME"; 
     
-    // Khoảng ID ảnh cần quét (ví dụ: từ 196111 đến 196170)
-    const startAttachmentId = 'startAttachmentId';
-    const endAttachmentId = 'endAttachmentId';
+    // Chỉ chấp nhận đáp án chứa các ký tự này (mặc định: A-F cho trắc nghiệm)
+    const VALID_CHARS = /^[A-F]+$/i;
     
-    // Thời gian chờ giữa mỗi request (milliseconds) - khuyến nghị 500-1000ms
-    const delayBetweenRequests = 500;
-
+    // Thời gian chờ giữa mỗi request (milliseconds) - khuyến nghị 200-500ms
+    const DELAY_MS = 200;
+    
     // ==========================================================================
     // CODE XỬ LÝ - Không cần chỉnh sửa phần bên dưới
     // ==========================================================================
 
-    console.log(`🚀 ĐANG QUÉT TRANG ĐỂ TÌM LINK BÌNH LUẬN CỦA: ${targetUser}...`);
+    console.log("🚀 ĐANG KHỞI ĐỘNG HỆ THỐNG QUÉT ĐÁP ÁN THÔNG MINH...");
+    console.log(`⭐ Chế độ ưu tiên: Người dùng '${PRIORITY_USER}'`);
+    console.log("📊 Chế độ dự phòng: Đáp án được comment nhiều nhất");
 
+    // 1. Quét giao diện để lấy link Media chứa bình luận
     const attachmentElements = document.querySelectorAll('.file--linked');
     let tasks = [];
 
@@ -30,72 +32,118 @@
         
         const attachmentId = anchor.id.replace('attachment-', '');
         
-        // Chỉ xử lý các ảnh trong khoảng đã cấu hình
-        if (attachmentId >= startAttachmentId && attachmentId <= endAttachmentId) {
-            const previewLink = element.querySelector('.file-preview');
-            if (previewLink && previewLink.getAttribute('data-lb-sidebar-href')) {
-                let mediaUrl = previewLink.getAttribute('data-lb-sidebar-href').split('?')[0];
-                if (!mediaUrl.startsWith('http')) {
-                    mediaUrl = window.location.origin + mediaUrl;
-                }
-
-                tasks.push({
-                    id: attachmentId,
-                    url: mediaUrl
-                });
+        // Lấy link Media từ thuộc tính data (nơi chứa bình luận thực tế)
+        const previewLink = element.querySelector('.file-preview');
+        if (previewLink && previewLink.getAttribute('data-lb-sidebar-href')) {
+            let mediaUrl = previewLink.getAttribute('data-lb-sidebar-href').split('?')[0];
+            if (!mediaUrl.startsWith('http')) {
+                mediaUrl = window.location.origin + mediaUrl;
             }
+            tasks.push({ id: attachmentId, url: mediaUrl });
         }
     });
 
-    console.log(`✅ Tìm thấy ${tasks.length} ảnh cần quét. Bắt đầu truy cập từng link Media...`);
+    console.log(`✅ Đã tìm thấy ${tasks.length} ảnh. Bắt đầu phân tích...`);
 
-    let csvContent = `ID Ảnh\tLink Media (Chứa bình luận)\tBình luận của ${targetUser}\n`;
-    let foundCount = 0;
+    let csvContent = `ID Ảnh\tLink Media\tĐáp án chốt\tNguồn (Lý do)\tChi tiết\n`;
+    
+    // Hàm làm sạch đáp án (Chỉ giữ lại ký tự hợp lệ)
+    // Ví dụ: "Câu này là A nha" -> "A", "Đáp án BC" -> "BC"
+    const extractAnswer = (text) => {
+        if (!text) return null;
+        // Xóa dấu chấm, phẩy, khoảng trắng thừa
+        let clean = text.replace(/[^a-zA-Z]/g, '').toUpperCase(); 
+        // Kiểm tra xem sau khi xóa rác, nó có phải là chuỗi hợp lệ không và độ dài hợp lý (1-5 ký tự)
+        if (clean.length > 0 && clean.length <= 5 && VALID_CHARS.test(clean)) {
+            return clean;
+        }
+        return null;
+    };
 
-    const cleanText = (text) => text.replace(/[\n\r]+/g, ' ').trim();
-
+    // 2. Duyệt qua từng ảnh
     for (let i = 0; i < tasks.length; i++) {
         const item = tasks[i];
-        
+        let finalAns = "";
+        let reason = "";
+        let detailLog = ""; // Ghi chú thêm cho CSV
+
         try {
             const response = await fetch(item.url);
             const htmlString = await response.text();
             const parser = new DOMParser();
             const doc = parser.parseFromString(htmlString, 'text/html');
 
+            // Lấy tất cả comment
             const comments = doc.querySelectorAll('.comment-contentWrapper, .message-inner');
-            let userComment = "";
+            
+            let freqMap = {}; // Bảng đếm tần suất: { "A": 5, "B": 2 }
+            let priorityAns = null;
 
             comments.forEach(comment => {
-                const usernameEl = comment.querySelector('.username');
-                if (usernameEl && usernameEl.innerText.trim().toLowerCase() === targetUser.toLowerCase()) {
-                    const bodyEl = comment.querySelector('.bbWrapper, .comment-body');
-                    if (bodyEl) {
-                        if (userComment !== "") userComment += " | ";
-                        userComment += cleanText(bodyEl.innerText);
+                const userEl = comment.querySelector('.username');
+                const bodyEl = comment.querySelector('.bbWrapper, .comment-body');
+
+                if (userEl && bodyEl) {
+                    const userName = userEl.innerText.trim();
+                    const rawText = bodyEl.innerText.trim();
+                    const ans = extractAnswer(rawText);
+
+                    if (ans) {
+                        // 1. Kiểm tra user ưu tiên ngay lập tức
+                        if (PRIORITY_USER && userName.toLowerCase() === PRIORITY_USER.toLowerCase()) {
+                            priorityAns = ans;
+                        }
+
+                        // 2. Đếm số lượng cho mọi người (để dùng nếu không có user ưu tiên)
+                        if (!freqMap[ans]) freqMap[ans] = 0;
+                        freqMap[ans]++;
                     }
                 }
             });
 
-            if (userComment !== "") {
-                foundCount++;
+            // --- QUYẾT ĐỊNH ĐÁP ÁN ---
+            if (priorityAns) {
+                finalAns = priorityAns;
+                reason = `Theo ${PRIORITY_USER}`;
+                detailLog = `${PRIORITY_USER} chọn ${priorityAns}`;
             } else {
-                userComment = "(Không có bình luận)";
+                // Tìm đáp án có lượt xuất hiện nhiều nhất
+                let maxCount = 0;
+                let bestKey = "Không có";
+                
+                for (const [key, count] of Object.entries(freqMap)) {
+                    if (count > maxCount) {
+                        maxCount = count;
+                        bestKey = key;
+                    }
+                }
+
+                if (maxCount > 0) {
+                    finalAns = bestKey;
+                    reason = `Top Vote (${maxCount} người chọn)`;
+                    // Tạo string chi tiết: A(5), B(1)...
+                    detailLog = Object.entries(freqMap).map(([k, v]) => `${k}(${v})`).join(', ');
+                } else {
+                    finalAns = "";
+                    reason = "Chưa có đáp án";
+                }
             }
 
-            console.log(`Running [${i+1}/${tasks.length}] Ảnh ${item.id} -> ${userComment}`);
-            csvContent += `${item.id}\t${item.url}\t${userComment}\n`;
+            console.log(`[${i+1}/${tasks.length}] Ảnh ${item.id}: ${finalAns || "???"} -> ${reason}`);
+            csvContent += `${item.id}\t${item.url}\t${finalAns}\t${reason}\t${detailLog}\n`;
 
         } catch (e) {
             console.error(`Lỗi tại ảnh ${item.id}`, e);
-            csvContent += `${item.id}\t${item.url}\tLỖI TRUY CẬP\n`;
+            csvContent += `${item.id}\t${item.url}\tLỖI\tLỗi truy cập\n`;
         }
 
-        await new Promise(r => setTimeout(r, delayBetweenRequests));
+        // Delay nhẹ để server không chặn
+        await new Promise(r => setTimeout(r, DELAY_MS));
     }
 
-    console.log(`\n🏁 HOÀN THÀNH! Tìm thấy ${foundCount} bình luận của ${targetUser}.`);
-    console.log("📋 COPY NỘI DUNG DƯỚI ĐÂY VÀO EXCEL:");
+    // 3. Xuất kết quả
+    console.log("🏁 HOÀN THÀNH QUÉT DỮ LIỆU!");
+    console.log("📋 --- COPY NỘI DUNG DƯỚI ĐÂY VÀO NOTEPAD RỒI LƯU THÀNH FILE .CSV ---");
     console.log(csvContent);
 
 })();
